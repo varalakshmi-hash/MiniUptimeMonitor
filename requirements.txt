@@ -1,0 +1,7 @@
+
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+httpx
+jinja2
+pydantic

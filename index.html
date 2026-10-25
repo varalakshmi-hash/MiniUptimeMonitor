@@ -1,0 +1,847 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Uptime Monitor</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 30px;
+            color: #56729e;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: auto;
+        }
+
+        h1 {
+            color: #1d4ed8;
+        }
+
+        .panel {
+            background: white;
+            padding: 22px;
+            margin: 20px 0;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px #00000010;
+        }
+
+        input {
+            padding: 12px;
+            width: 65%;
+            max-width: 500px;
+            border: 1px solid #cbd5e1;
+            border-radius: 5px;
+        }
+
+        button {
+            padding: 11px 15px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 4px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .site {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 18px 0;
+            overflow-wrap: anywhere;
+        }
+
+        .online {
+            color: #15803d;
+            font-weight: bold;
+        }
+
+        .offline {
+            color: #dc2626;
+            font-weight: bold;
+        }
+
+        .unknown {
+            color: #64748b;
+            font-weight: bold;
+        }
+
+        .details {
+            color: #475569;
+            line-height: 1.6;
+        }
+
+        .message {
+            margin-top: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .success-message {
+            color: #15803d;
+        }
+
+        .error-message {
+            color: #dc2626;
+        }
+
+        .empty {
+            color: #64748b;
+            padding: 15px 0;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            min-height: 250px;
+        }
+
+        #responseChart {
+            width: 100%;
+            max-height: 400px;
+        }
+
+        .timeline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 18px 0;
+        }
+
+        .timeline-item {
+            width: 28px;
+            height: 34px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid #cbd5e1;
+            padding: 0;
+            margin: 0;
+        }
+
+        .timeline-item:hover {
+            opacity: 0.75;
+            outline: 2px solid #334155;
+        }
+
+        .timeline-up {
+            background: #22c55e;
+        }
+
+        .timeline-down {
+            background: #ef4444;
+        }
+
+        .timeline-degraded {
+            background: #f59e0b;
+        }
+
+        .timeline-pending {
+            background: #94a3b8;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            color: #475569;
+            font-size: 14px;
+        }
+
+        .legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 12px;
+            }
+
+            input {
+                width: 100%;
+                max-width: none;
+                margin-bottom: 8px;
+            }
+
+            .panel {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<div class="container">
+
+    <h1>Mini Uptime Monitor</h1>
+    <p>Monitor website availability, response times, and uptime.</p>
+
+    <div class="panel">
+        <h2>Add a Website</h2>
+
+        <form id="siteForm">
+            <input
+                id="url"
+                type="url"
+                placeholder="https://example.com"
+                required
+            >
+            <button id="addButton" type="submit">Add Website</button>
+        </form>
+
+        <p id="message" class="message" role="status"></p>
+    </div>
+
+    <div class="panel">
+        <h2>Response Time History</h2>
+        <p id="chartDescription" class="details">
+            Select View Chart for a website below.
+        </p>
+
+        <div class="chart-container">
+            <canvas id="responseChart"></canvas>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Website Status Timeline</h2>
+        <p id="timelineDescription" class="details">
+            Select View Timeline for a website below.
+        </p>
+
+        <div id="timeline" class="timeline"></div>
+
+        <div class="legend">
+            <span>
+                <i class="legend-color timeline-up"></i> UP
+            </span>
+            <span>
+                <i class="legend-color timeline-down"></i> DOWN
+            </span>
+            <span>
+                <i class="legend-color timeline-degraded"></i> DEGRADED
+            </span>
+            <span>
+                <i class="legend-color timeline-pending"></i> Other
+            </span>
+        </div>
+
+        <p id="timelineDetails" class="details"></p>
+    </div>
+
+    <div class="panel">
+        <h2>Monitored Websites</h2>
+
+        <button id="refreshButton" type="button">
+            Refresh Dashboard
+        </button>
+
+        <div id="sites">
+            <p class="empty">Loading websites...</p>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const API = "/api/sites";
+
+    const siteContainer = document.getElementById("sites");
+    const message = document.getElementById("message");
+    const siteForm = document.getElementById("siteForm");
+    const urlInput = document.getElementById("url");
+    const addButton = document.getElementById("addButton");
+    const refreshButton = document.getElementById("refreshButton");
+
+    const chartDescription =
+        document.getElementById("chartDescription");
+    const timelineDescription =
+        document.getElementById("timelineDescription");
+    const timelineContainer =
+        document.getElementById("timeline");
+    const timelineDetails =
+        document.getElementById("timelineDetails");
+
+    let responseChartInstance = null;
+
+    async function readResponse(response) {
+        const text = await response.text();
+        let data = {};
+
+        if (text) {
+            try {
+                data = JSON.parse(text);
+            } catch {
+                data = { detail: text };
+            }
+        }
+
+        if (!response.ok) {
+            const detail = data.detail;
+
+            throw new Error(
+                typeof detail === "string"
+                    ? detail
+                    : detail != null
+                        ? JSON.stringify(detail)
+                        : "Request failed with status " + response.status
+            );
+        }
+
+        return data;
+    }
+
+    function showMessage(text, type) {
+        message.textContent = text;
+        message.className = "message " + (type || "");
+    }
+
+    function createTextElement(tag, text, className) {
+        const element = document.createElement(tag);
+        element.textContent = text;
+
+        if (className) {
+            element.className = className;
+        }
+
+        return element;
+    }
+
+    async function loadSites() {
+        siteContainer.replaceChildren(
+            createTextElement("p", "Loading websites...", "empty")
+        );
+
+        try {
+            const response = await fetch(API);
+            const sites = await readResponse(response);
+
+            if (!Array.isArray(sites)) {
+                throw new Error("The API did not return a website list.");
+            }
+
+            siteContainer.replaceChildren();
+
+            if (sites.length === 0) {
+                siteContainer.appendChild(
+                    createTextElement(
+                        "p",
+                        "No websites added yet. Add one above.",
+                        "empty"
+                    )
+                );
+                return;
+            }
+
+            sites.forEach(site => {
+                const div = document.createElement("div");
+                div.className = "site";
+
+                const heading = createTextElement(
+                    "h3",
+                    site.name && site.name !== "string"
+                        ? site.name
+                        : site.url
+                );
+
+                const url = createTextElement(
+                    "p",
+                    site.url || "No URL"
+                );
+
+                const rawStatus = String(
+                    site.status || "Unknown"
+                ).toUpperCase();
+
+                let displayStatus = "Not checked yet";
+                let statusClass = "unknown";
+
+                if (rawStatus === "UP" || rawStatus === "ONLINE") {
+                    displayStatus = "Online";
+                    statusClass = "online";
+                } else if (
+                    rawStatus === "DOWN" ||
+                    rawStatus === "OFFLINE"
+                ) {
+                    displayStatus = "Offline";
+                    statusClass = "offline";
+                } else if (rawStatus !== "UNKNOWN") {
+                    displayStatus = site.status;
+                }
+
+                const status = createTextElement(
+                    "p",
+                    "Status: " + displayStatus,
+                    statusClass
+                );
+
+                const statusCode = createTextElement(
+                    "p",
+                    "HTTP status code: " +
+                    (site.status_code ?? "N/A"),
+                    "details"
+                );
+
+                const responseTime = createTextElement(
+                    "p",
+                    "Response time: " +
+                    (site.response_time_ms != null
+                        ? site.response_time_ms + " ms"
+                        : "N/A"),
+                    "details"
+                );
+
+                const uptime = createTextElement(
+                    "p",
+                    "Uptime: " +
+                    (site.uptime_percentage != null
+                        ? site.uptime_percentage + "%"
+                        : "N/A"),
+                    "details"
+                );
+
+                const interval = createTextElement(
+                    "p",
+                    "Check interval: " +
+                    (site.interval_seconds ?? "N/A") +
+                    (site.interval_seconds != null ? " seconds" : ""),
+                    "details"
+                );
+
+                const lastChecked = createTextElement(
+                    "p",
+                    "Last checked: " +
+                    (site.last_checked
+                        ? new Date(site.last_checked).toLocaleString()
+                        : "Not checked yet"),
+                    "details"
+                );
+
+                const checkButton = document.createElement("button");
+                checkButton.textContent = "Check Now";
+                checkButton.addEventListener("click", () => {
+                    checkSite(site.id, checkButton);
+                });
+
+                const chartButton = document.createElement("button");
+                chartButton.textContent = "View Chart";
+                chartButton.addEventListener("click", () => {
+                    drawResponseChart(site.id, site.url);
+                });
+
+                const timelineButton = document.createElement("button");
+                timelineButton.textContent = "View Timeline";
+                timelineButton.addEventListener("click", () => {
+                    drawTimeline(site.id, site.url);
+                });
+
+                const historyButton = document.createElement("button");
+                historyButton.textContent = "View History";
+                historyButton.addEventListener("click", () => {
+                    viewHistory(site.id);
+                });
+
+                const deleteButton = document.createElement("button");
+                deleteButton.textContent = "Delete";
+                deleteButton.addEventListener("click", () => {
+                    deleteSite(site.id);
+                });
+
+                div.append(
+                    heading,
+                    url,
+                    status,
+                    statusCode,
+                    responseTime,
+                    uptime,
+                    interval,
+                    lastChecked,
+                    checkButton,
+                    chartButton,
+                    timelineButton,
+                    historyButton,
+                    deleteButton
+                );
+
+                siteContainer.appendChild(div);
+            });
+
+        } catch (error) {
+            siteContainer.replaceChildren(
+                createTextElement(
+                    "p",
+                    "Could not load websites: " + error.message,
+                    "error-message"
+                )
+            );
+        }
+    }
+
+    siteForm.addEventListener("submit", async function(event) {
+        event.preventDefault();
+
+        const url = urlInput.value.trim();
+
+        if (!url) {
+            showMessage("Please enter a website URL.", "error-message");
+            return;
+        }
+
+        addButton.disabled = true;
+        showMessage("Adding website...", "");
+
+        try {
+            const response = await fetch(API, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ url: url })
+            });
+
+            await readResponse(response);
+
+            showMessage(
+                "Website added successfully!",
+                "success-message"
+            );
+
+            urlInput.value = "";
+            await loadSites();
+
+        } catch (error) {
+            showMessage(
+                "Could not add website: " + error.message,
+                "error-message"
+            );
+            await loadSites();
+
+        } finally {
+            addButton.disabled = false;
+        }
+    });
+
+    async function checkSite(id, button) {
+        button.disabled = true;
+        button.textContent = "Checking...";
+
+        try {
+            const response = await fetch(
+                `${API}/${id}/check`,
+                { method: "POST" }
+            );
+
+            await readResponse(response);
+
+            showMessage(
+                "Website check completed.",
+                "success-message"
+            );
+
+            await loadSites();
+
+        } catch (error) {
+            showMessage(
+                "Check failed: " + error.message,
+                "error-message"
+            );
+
+        } finally {
+            button.disabled = false;
+            button.textContent = "Check Now";
+        }
+    }
+
+    async function getChecks(id) {
+        const response = await fetch(`${API}/${id}/checks`);
+        const checks = await readResponse(response);
+
+        if (!Array.isArray(checks)) {
+            throw new Error("The API did not return check history.");
+        }
+
+        // The API usually returns newest records first.
+        return [...checks].reverse();
+    }
+
+    async function drawResponseChart(id, url) {
+        chartDescription.textContent =
+            "Loading response-time history for " + url + "...";
+
+        try {
+            const checks = await getChecks(id);
+
+            if (checks.length === 0) {
+                chartDescription.textContent =
+                    "No check history is available for " + url + " yet.";
+
+                if (responseChartInstance) {
+                    responseChartInstance.destroy();
+                    responseChartInstance = null;
+                }
+
+                return;
+            }
+
+            const labels = checks.map((check, index) => {
+                const time =
+                    check.checked_at ||
+                    check.timestamp ||
+                    check.created_at;
+
+                return time
+                    ? new Date(time).toLocaleTimeString()
+                    : "Check " + (index + 1);
+            });
+
+            const responseTimes = checks.map(check => {
+                const value =
+                    check.response_time_ms ?? check.response_time;
+
+                return value == null ? null : Number(value);
+            });
+
+            if (responseChartInstance) {
+                responseChartInstance.destroy();
+            }
+
+            chartDescription.textContent =
+                "Response-time history for " + url + ".";
+
+            responseChartInstance = new Chart(
+                document.getElementById("responseChart"),
+                {
+                    type: "line",
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: "Response Time (ms)",
+                            data: responseTimes,
+                            borderColor: "#2563eb",
+                            backgroundColor: "rgba(37, 99, 235, 0.12)",
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            tension: 0.2,
+                            fill: true,
+                            spanGaps: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: "Response Time (ms)"
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: "Check Time"
+                                }
+                            }
+                        }
+                    }
+                }
+            );
+
+        } catch (error) {
+            chartDescription.textContent =
+                "Could not load chart: " + error.message;
+        }
+    }
+
+    async function drawTimeline(id, url) {
+        timelineDescription.textContent =
+            "Loading status history for " + url + "...";
+
+        timelineDetails.textContent = "";
+        timelineContainer.replaceChildren();
+
+        try {
+            const checks = await getChecks(id);
+
+            if (checks.length === 0) {
+                timelineDescription.textContent =
+                    "No check history is available for " + url + " yet.";
+                return;
+            }
+
+            // Show the latest 30 checks.
+            const recentChecks = checks.slice(-30);
+
+            timelineDescription.textContent =
+                "Recent status checks for " + url +
+                ". Select a colored block to view its details.";
+
+            recentChecks.forEach((check, index) => {
+                const rawStatus = String(
+                    check.status || "UNKNOWN"
+                ).toUpperCase();
+
+                let colorClass = "timeline-pending";
+
+                if (rawStatus === "UP") {
+                    colorClass = "timeline-up";
+                } else if (rawStatus === "DOWN") {
+                    colorClass = "timeline-down";
+                } else if (rawStatus === "DEGRADED") {
+                    colorClass = "timeline-degraded";
+                }
+
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className =
+                    "timeline-item " + colorClass;
+
+                const time =
+                    check.checked_at ||
+                    check.timestamp ||
+                    check.created_at ||
+                    "Time unknown";
+
+                const responseTime =
+                    check.response_time_ms ??
+                    check.response_time ??
+                    "N/A";
+
+                const statusCode = check.status_code ?? "N/A";
+
+                button.title =
+                    "Status: " + rawStatus +
+                    " | Time: " + time +
+                    " | Response: " + responseTime + " ms";
+
+                button.setAttribute(
+                    "aria-label",
+                    "Check " + (index + 1) + ": " + rawStatus
+                );
+
+                button.addEventListener("click", () => {
+                    timelineDetails.textContent =
+                        "Status: " + rawStatus +
+                        " | Checked: " +
+                        new Date(time).toLocaleString() +
+                        " | HTTP code: " + statusCode +
+                        " | Response time: " + responseTime + " ms" +
+                        (check.error ? " | Error: " + check.error : "");
+                });
+
+                timelineContainer.appendChild(button);
+            });
+
+            const latest = recentChecks[recentChecks.length - 1];
+            const latestStatus = String(
+                latest.status || "UNKNOWN"
+            ).toUpperCase();
+
+            timelineDetails.textContent =
+                "Latest recorded status: " + latestStatus +
+                ". Showing " + recentChecks.length + " recent checks.";
+
+        } catch (error) {
+            timelineDescription.textContent =
+                "Could not load timeline: " + error.message;
+        }
+    }
+
+    async function viewHistory(id) {
+        try {
+            const checks = await getChecks(id);
+
+            if (checks.length === 0) {
+                alert("No check history available yet.");
+                return;
+            }
+
+            const history = checks.slice().reverse().map(check => {
+                const time =
+                    check.checked_at ||
+                    check.timestamp ||
+                    check.created_at ||
+                    "Time unknown";
+
+                const status = check.status || "Unknown";
+
+                const responseMs =
+                    check.response_time_ms ??
+                    check.response_time ??
+                    "N/A";
+
+                return (
+                    time +
+                    " | Status: " + status +
+                    " | Response: " + responseMs + " ms"
+                );
+            }).join("\n");
+
+            alert("Website Check History\n\n" + history);
+
+        } catch (error) {
+            alert("Could not load history: " + error.message);
+        }
+    }
+
+    async function deleteSite(id) {
+        if (!confirm("Are you sure you want to delete this website?")) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API}/${id}`, {
+                method: "DELETE"
+            });
+
+            await readResponse(response);
+
+            showMessage(
+                "Website deleted successfully.",
+                "success-message"
+            );
+
+            await loadSites();
+
+        } catch (error) {
+            showMessage(
+                "Could not delete website: " + error.message,
+                "error-message"
+            );
+        }
+    }
+
+    refreshButton.addEventListener("click", loadSites);
+
+    loadSites();
+</script>
+
+</body>
+</html>
